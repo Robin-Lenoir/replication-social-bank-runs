@@ -39,13 +39,12 @@ This single command will:
 1. Run all baseline model computations (8 figures)
 2. Run all extension computations (5 figures)
 3. Generate all figure PDFs in `../output/figures/`
-4. Auto-generate a LaTeX document with all figures at `../output/replication_figures.tex`
 
 **Estimated runtime:** 5-15 minutes (depending on system)
 
 ### 3. (Optional) View Compiled Figures Document
 
-To compile the auto-generated LaTeX document containing all figures:
+You may compile a LaTeX document containing all figures:
 
 ```bash
 cd ../output
@@ -110,27 +109,7 @@ scripts/
 - **Extension 2 - Interest Rates:** Value function + hazard decomposition (2 figures)
 - **Extension 3 - Social Learning:** Social learning equilibrium + baseline comparison (2 figures)
 
-## Running Individual Scripts
-
-To run specific parts of the replication:
-
-```julia
-# Baseline only
-include("scripts/1_baseline.jl")
-
-# Specific extension
-include("scripts/2_heterogeneity.jl")
-include("scripts/3_interest_rates.jl")
-include("scripts/4_social_learning.jl")
-```
-
 ## Computational Methods
-
-The solver implements a three-stage computational architecture:
-
-1. **Stage 1 - Learning Dynamics:** Solve learning ODE using adaptive Runge-Kutta methods
-2. **Stage 2 - Optimal Buffers:** Compute withdrawal times from hazard rate crossings
-3. **Stage 3 - Equilibrium:** Solve for crisis time ξ using bisection method
 
 For detailed computational methods and mathematical derivations, see:
 - **Paper Appendix C: Computational Methods**
