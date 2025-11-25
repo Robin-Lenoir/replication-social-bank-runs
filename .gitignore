@@ -1,0 +1,23 @@
+  # Julia
+  *.jl.cov
+  *.jl.*.cov
+  *.jl.mem
+
+  # Logs
+  *.log
+
+  # LaTeX auxiliary
+  *.aux
+  *.bbl
+  *.blg
+  *.fdb_latexmk
+  *.fls
+  *.synctex.gz
+
+  # Editor files
+  .DS_Store
+  .auctex-auto
+  .vscode/
+  *~
+  *.swp
+  *.el
