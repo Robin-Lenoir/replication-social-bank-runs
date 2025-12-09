@@ -34,7 +34,7 @@ Variables:
 - V(τ̄) represents continuation value of 1 dollar of deposits
 
 # Boundary Condition (Appendix C, line 192)
-V(0) = δ/(δ-r) (terminal value at crash time, τ̄ = 0 corresponds to τ = ξ*)
+V(0) = (u+δ)/(r+δ) (present value at crash time: convenience yield u, interest r, maturity δ)
 
 # Arguments
 - `hr`: Hazard rate function (LinearInterpolation object)
@@ -53,7 +53,7 @@ V(0) = δ/(δ-r) (terminal value at crash time, τ̄ = 0 corresponds to τ = ξ*
 # Technical Implementation
 - **Time Direction**: Integrates forward in τ̄ (reversed time from collapse)
 - **ODE Solver**: AutoTsit5(Rosenbrock23()) with high precision
-- **Boundary Treatment**: Starts from V(0) = δ/(δ-r)
+- **Boundary Treatment**: Starts from V(0) = (u+δ)/(r+δ)
 - **Reentry Threshold**: Optimal reentry when rV(τ̄) > h(τ̄)
 
 # Example
@@ -73,7 +73,7 @@ function solve_value_function(hr, δ, r, u; tol=eps())
     hr_grid = hr.itp.knots[1]
 
     # Terminal condition (boundary value at τ̄ = 0)
-    V_terminal = δ / (δ - r)
+    V_terminal = (u + δ) / (r + δ)
 
     # Time span for integration (forward in reversed time τ̄)
     tspan = (0.0, hr_grid[end])

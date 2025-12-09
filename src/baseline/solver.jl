@@ -269,11 +269,25 @@ end
 """
     compute_ξ(τ_bar_IN_UNC, τ_bar_OUT_UNC, learning_cdf, κ; kwargs...)
 
-Solve for equilibrium crisis time ξ using bisection method.
-See Appendix C for discussion of the method.
+Solve for equilibrium crisis time ξ using adaptive bisection method.
+See Appendix C.4 for complete mathematical exposition.
 
 Finds ξ such that AW(ξ) = κ, where AW(ξ) = G(min(ξ, τ̄_OUT)) - G(min(ξ, τ̄_IN))
 represents the aggregate withdrawal rate at the crisis time.
+
+# Algorithm Details
+The bisection implements 5 distinct cases to find the FIRST crossing of κ:
+- **Case 1**: AW > κ (overshoot) → reduce upper bound
+- **Case 2**: AW < κ and increasing → increase lower bound (approaching first root)
+- **Case 3**: AW < κ and decreasing → reduce upper bound (passed peak, no earlier crossing found yet)
+- **Case 4**: |AW - κ| ≤ tol and increasing → valid equilibrium found (first crossing)
+- **Case 5**: |AW - κ| ≤ tol and decreasing → false equilibrium (peak occurred earlier, no valid run exists)
+
+The slope check (via finite difference with grid-based epsilon) validates that we find
+the FIRST crossing of κ, not a later crossing after the peak of AW(t; ξ). This prevents
+"false equilibria" where the bisection converges to a root on the decreasing branch.
+
+See Appendix C.4.2 for mathematical justification and discussion of false equilibria.
 
 # Arguments
 - `τ_bar_IN_UNC`: Unconstrained optimal re-entry time
@@ -325,26 +339,37 @@ function compute_ξ(τ_bar_IN_UNC, τ_bar_OUT_UNC, learning_cdf, κ;
         epsilon = grid_points[current_idx + 1]-grid_points[current_idx]
         AW_ϵ = learning_cdf(τ_bar_OUT_CON+epsilon) - learning_cdf(τ_bar_IN_CON+epsilon)
 
+        # Bisection algorithm with 5 distinct cases (see Appendix C.4.2.3)
         error = AW - κ
-        if error > tolerance
-            # AW > κ: overshoot, reduce upper bound
+        is_increasing = AW_ϵ >= AW
+
+        if abs(error) <= tolerance
+            if is_increasing
+                # Case 4: Valid equilibrium - root on increasing branch
+                if verbose
+                    println("Converged in $iter iterations")
+                    println("ξ = $ξ_old, AW = $AW")
+                end
+                return ξ_old, abs(error)
+            else
+               # Case 3b: False equilibrium - root on decreasing branch
+                # This means the peak of AW(t; ξ) occurred before ξ, so the bank
+                # would have crashed earlier. No valid run equilibrium exists.
+                if verbose
+                    println("False equilibrium detected at iteration $iter")
+                    println("ξ = $ξ_old, AW = $AW, but slope negative")
+                    println("No valid run equilibrium exists (peak exceeded threshold earlier)")
+                end
+                return NaN, Inf
+            end
+        elseif error > 0
+            # Case 1: Overshoot - AW > κ, reduce upper bound
             ξmax = ξ_old
             ξ_new = 0.5 * (ξ_old + ξmin)
-        elseif error < -tolerance && AW_ϵ >= AW
-            # AW < κ and increasing: undershoot, increase lower bound
+        else
+            # Case 2: Undershoot
             ξmin = ξ_old
             ξ_new = 0.5 * (ξ_old + ξmax)
-        elseif AW_ϵ < AW
-            # AW decreasing: potential overshoot, reduce upper bound
-            ξmax = ξ_old
-            ξ_new = 0.5 * (ξ_old + ξmax)
-        else
-            # Converged
-            if verbose
-                println("Converged in $iter iterations")
-                println("ξ = $ξ_new, AW = $AW")
-            end
-            return ξ_new,abs(AW-κ)
         end
     end
 

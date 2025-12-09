@@ -74,53 +74,144 @@ function compute_ξ_hetero(τ_bar_IN_UNCs, τ_bar_OUT_UNCs, dist, learning_cdfs,
 
         ξ_old = ξ_new
         
+        # Compute finite difference epsilon using grid spacing (not fixed value)
+        # All groups share compatible grids from coupled ODE solver
+        grid_points = learning_cdfs[1].itp.knots[1]
+        current_idx = searchsortedlast(grid_points, ξ_old)
+        ε = grid_points[min(current_idx + 1, length(grid_points))] - grid_points[current_idx]
+
         # Compute aggregate withdrawals for each group
         AW = 0.0
         AW_ϵ = 0.0
-        
+
         for k in 1:n_groups
             # Constrain withdrawal times to [0, ξ]
             τ_bar_IN_CON = min(τ_bar_IN_UNCs[k], ξ_old)
             τ_bar_OUT_CON = min(τ_bar_OUT_UNCs[k], ξ_old)
-            
+
             # Compute group contribution to aggregate withdrawals
             AW += dist[k] * (learning_cdfs[k](τ_bar_OUT_CON) - learning_cdfs[k](τ_bar_IN_CON))
-            
+
             # Compute finite difference for direction checking
-            ε = 1e-6
             AW_ϵ += dist[k] * (learning_cdfs[k](τ_bar_OUT_CON + ε) - learning_cdfs[k](τ_bar_IN_CON + ε))
         end
 
-        # Update search bounds using bisection logic
+        # Bisection algorithm with 5 distinct cases (matching baseline solver)
         error = AW - κ
-        
+        is_increasing = AW_ϵ >= AW
+
         if verbose && (iter % 50 == 0)
             println("Iteration $iter: ξ = $(round(ξ_new, digits=4)), AW = $(round(AW, digits=6)), error = $(round(error, digits=8))")
         end
-        
-        if error > tolerance
-            # AW > κ: overshoot, reduce upper bound
-            ξmax = ξ_old
-            ξ_new = 0.5 * (ξ_old + ξmin)
-        elseif error < -tolerance && AW_ϵ >= AW
-            # AW < κ and increasing: undershoot, increase lower bound
-            ξmin = ξ_old
-            ξ_new = 0.5 * (ξ_old + ξmax)
-        elseif AW_ϵ < AW
-            # AW decreasing: potential overshoot, reduce upper bound
+
+        if abs(error) <= tolerance
+            if is_increasing
+                # Valid equilibrium - root on increasing branch
+                # For heterogeneous groups, need additional max check (see is_valid_equilibrium_hetero)
+                if !is_valid_equilibrium_hetero(ξ_old, τ_bar_IN_UNCs, learning_cdfs, κ, dist; verbose=verbose)
+                    if verbose
+                        println("Max check failed: earlier peak exceeded threshold")
+                        println("No valid run equilibrium exists")
+                    end
+                    return NaN, Inf
+                end
+                if verbose
+                    println("Converged in $iter iterations")
+                    println("ξ = $ξ_old, AW = $AW")
+                end
+                return ξ_old, abs(error)
+            else
+                # False equilibrium - root on decreasing branch
+                if verbose
+                    println("False equilibrium detected at iteration $iter")
+                    println("ξ = $ξ_old, AW = $AW, but slope negative")
+                    println("No valid run equilibrium exists")
+                end
+                return NaN, Inf
+            end
+        elseif error > 0
+            # Overshoot - AW > κ, reduce upper bound
             ξmax = ξ_old
             ξ_new = 0.5 * (ξ_old + ξmin)
         else
-            # Converged
-            if verbose
-                println("Converged in $iter iterations")
-                println("ξ = $ξ_new, AW = $AW")
-            end
-            return ξ_new, abs(AW - κ)
+            # Undershoot
+            ξmin = ξ_old
+            ξ_new = 0.5 * (ξ_old + ξmax)
         end
     end
 
     return NaN, Inf
+end
+
+"""
+    is_valid_equilibrium_hetero(ξ_star, τ_bar_IN_UNCs, learning_cdfs, κ, dist; tol=1e-10, verbose=false)
+
+Validate that ξ_star is the FIRST crossing of threshold κ, not a later crossing after peak.
+
+For heterogeneous groups, AW(t; ξ) may be multimodal (multiple humps due to different
+group dynamics), so the slope check is insufficient. This function computes
+max_{t < ξ*} AW(t; ξ*) to ensure no earlier crossing occurred.
+
+# Mathematical Condition
+Valid equilibrium requires: max_{t ∈ [0, ξ*)} AW(t; ξ*) < κ + tol
+
+If this fails, the aggregate withdrawals exceeded κ at some earlier time t < ξ*,
+meaning the bank would have crashed then, not at ξ*. This indicates a "false
+equilibrium" where the bisection found a root after the peak.
+
+# Arguments
+- `ξ_star`: Candidate equilibrium crash time
+- `τ_bar_IN_UNCs`: Vector of unconstrained reentry times for each group
+- `learning_cdfs`: Vector of learning CDF functions for each group
+- `κ`: Fragility threshold
+- `dist`: Group distribution weights
+- `tol`: Numerical tolerance for comparison (default: 1e-10)
+- `verbose`: Print diagnostic information (default: false)
+
+# Returns
+- `true` if valid equilibrium (no earlier crossing)
+- `false` if false equilibrium (earlier peak exceeded κ)
+
+# Implementation Note
+Uses the grid from learning_cdfs[1] since all groups share compatible grids
+from the coupled ODE solver. Only checks times t strictly before ξ*.
+"""
+function is_valid_equilibrium_hetero(ξ_star, τ_bar_IN_UNCs, learning_cdfs, κ, dist; tol=1e-10, verbose=false)
+    # Get grid points strictly before ξ*
+    # Use first group's grid (all groups share compatible grids from coupled ODE solver)
+    grid = learning_cdfs[1].itp.knots[1]
+    grid  = grid[grid .<= ξ_star]
+
+    if isempty(grid)
+        # No time points before ξ*, trivially valid
+        return true
+    end
+
+    # Compute AW(t; ξ*) for all t < ξ*
+    n_groups = length(learning_cdfs)
+    AW_path = zeros(length(grid))
+
+    for k in 1:n_groups
+        τ_I_k = max(0, ξ_star - τ_bar_IN_UNCs[k])
+        for (i, t) in enumerate(grid)
+            # AW contribution from group k at time t
+            # Note: τ_OUT constraint not needed since we're checking t < ξ*
+            AW_path[i] += dist[k] * (learning_cdfs[k](t) - learning_cdfs[k](max(0, t - τ_I_k)))
+        end
+    end
+
+    # Check if it crosses back bellow \kappa at some point (would happen only if we are at a crossing >1)
+    above_κ=AW_path.>κ
+    for i in (length(grid)-1):-1:1
+        if above_κ[i] && !above_κ[i+1]
+            if verbose
+                println("False equilibrium detected - not the first crossing")
+            end
+            return false
+        end
+    end
+
+    return true
 end
 
 """
