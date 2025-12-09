@@ -278,10 +278,9 @@ represents the aggregate withdrawal rate at the crisis time.
 # Algorithm Details
 The bisection implements 5 distinct cases to find the FIRST crossing of κ:
 - **Case 1**: AW > κ (overshoot) → reduce upper bound
-- **Case 2**: AW < κ and increasing → increase lower bound (approaching first root)
-- **Case 3**: AW < κ and decreasing → reduce upper bound (passed peak, no earlier crossing found yet)
-- **Case 4**: |AW - κ| ≤ tol and increasing → valid equilibrium found (first crossing)
-- **Case 5**: |AW - κ| ≤ tol and decreasing → false equilibrium (peak occurred earlier, no valid run exists)
+- **Case 2**: AW < κ  → increase lower bound (approaching first root)
+- **Case 3a**: |AW - κ| ≤ tol and increasing → valid equilibrium found (first crossing)
+- **Case 3b**: |AW - κ| ≤ tol and decreasing → false equilibrium (peak occurred earlier, no valid run exists)
 
 The slope check (via finite difference with grid-based epsilon) validates that we find
 the FIRST crossing of κ, not a later crossing after the peak of AW(t; ξ). This prevents
@@ -345,7 +344,7 @@ function compute_ξ(τ_bar_IN_UNC, τ_bar_OUT_UNC, learning_cdf, κ;
 
         if abs(error) <= tolerance
             if is_increasing
-                # Case 4: Valid equilibrium - root on increasing branch
+                # Case 3a: Valid equilibrium - root on increasing branch
                 if verbose
                     println("Converged in $iter iterations")
                     println("ξ = $ξ_old, AW = $AW")

@@ -149,14 +149,10 @@ end
 Validate that ξ_star is the FIRST crossing of threshold κ, not a later crossing after peak.
 
 For heterogeneous groups, AW(t; ξ) may be multimodal (multiple humps due to different
-group dynamics), so the slope check is insufficient. This function computes
-max_{t < ξ*} AW(t; ξ*) to ensure no earlier crossing occurred.
-
-# Mathematical Condition
-Valid equilibrium requires: max_{t ∈ [0, ξ*)} AW(t; ξ*) < κ + tol
-
-If this fails, the aggregate withdrawals exceeded κ at some earlier time t < ξ*,
-meaning the bank would have crashed then, not at ξ*. This indicates a "false
+group dynamics), so the slope check is insufficient. This function checks if there was an earlier crossing.
+Formally, we check if there is a crossing from above to bellow before the root.
+The logic is that if there is, then it must be that we crossed from bellow to above somepoint before (by continuity).
+So the root is not the first crossing. This indicates a "false
 equilibrium" where the bisection found a root after the peak.
 
 # Arguments
@@ -174,7 +170,7 @@ equilibrium" where the bisection found a root after the peak.
 
 # Implementation Note
 Uses the grid from learning_cdfs[1] since all groups share compatible grids
-from the coupled ODE solver. Only checks times t strictly before ξ*.
+from the coupled ODE solver.
 """
 function is_valid_equilibrium_hetero(ξ_star, τ_bar_IN_UNCs, learning_cdfs, κ, dist; tol=1e-10, verbose=false)
     # Get grid points strictly before ξ*
@@ -195,7 +191,6 @@ function is_valid_equilibrium_hetero(ξ_star, τ_bar_IN_UNCs, learning_cdfs, κ,
         τ_I_k = max(0, ξ_star - τ_bar_IN_UNCs[k])
         for (i, t) in enumerate(grid)
             # AW contribution from group k at time t
-            # Note: τ_OUT constraint not needed since we're checking t < ξ*
             AW_path[i] += dist[k] * (learning_cdfs[k](t) - learning_cdfs[k](max(0, t - τ_I_k)))
         end
     end
