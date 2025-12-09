@@ -113,7 +113,7 @@ scripts/
 
 For detailed computational methods and mathematical derivations, see:
 - **Paper Appendix C: Computational Methods**
-- **Local copy:** `docs/appendix_c.pdf` (included in this package)
+- **Local copy:** `docs/paper.pdf` (included in this package)
 
 
 ## Dependencies
@@ -142,4 +142,4 @@ For questions or issues with the replication package:
 
 ---
 
-*Last updated: November 2025*
+*Last updated: December 2025*
