@@ -13,7 +13,9 @@ println("="^80)
 println()
 
 # Track execution time
+
 master_start = time()
+
 
 # Track which figures are generated
 generated_figures = String[]

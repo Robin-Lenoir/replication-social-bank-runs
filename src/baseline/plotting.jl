@@ -297,6 +297,183 @@ function plot_comp_stat_withdrawals_and_collapse(u_values, max_withdrawals, coll
                      text("No Bank Run", 8, :black, rotation=90))
         end
     end
-    
+
+    return p1, p2
+end
+
+"""
+    plot_comp_stat_with_participation(u_values, max_withdrawals, collapse_times, κ, h_un_values; return_times=nothing)
+
+Create comparative statics plots with participation boundary shading.
+
+This function extends plot_comp_stat_withdrawals_and_collapse by adding a shaded region
+where agents do not participate (u < h_un(ξ*)). The "no participation" region is shown
+in addition to the existing "no bank run" region.
+
+# Arguments
+- `u_values`: Vector of utility values
+- `max_withdrawals`: Vector of peak withdrawals
+- `collapse_times`: Vector of collapse times
+- `κ`: Solvency threshold
+- `h_un_values`: Vector of uninformed hazard rates h_un(ξ*) for each u
+- `return_times`: Optional vector of return times
+
+# Returns
+- Tuple of two plots: (peak_withdrawals_plot, collapse_time_plot)
+"""
+function plot_comp_stat_with_participation(u_values, max_withdrawals, collapse_times, κ, h_un_values;
+                                          return_times=nothing)
+    gr()
+    default(fontfamily="Computer Modern")
+
+    # Find valid (non-NaN) values for collapse times
+    valid_collapse = .!isnan.(collapse_times)
+
+    # Identify participation boundary: where u ≤ h_un(ξ*)
+    no_participation = u_values .<= h_un_values
+
+    # Panel 1: Peak Withdrawals
+    p1 = plot(u_values, max_withdrawals,
+              xlabel="Deposit Utility (u)", ylabel="Peak Withdrawals",
+              title="(a) Effect on Peak Withdrawals (with Participation Constraint)",
+              legend=false, color=:darkred,
+              ylims=(0, 1))
+
+    # Add threshold line
+    hline!(p1, [κ], color=:grey, linewidth=1, linestyle=:dash, label="")
+    annotate!(p1, u_values[1] + 0.03, κ + 0.025,
+             text("κ = $κ", 8, :left, :grey))
+
+    # Three-region color scheme with tame colors and high transparency
+    alpha_val = 0.15
+
+    # Region 1: No participation (u ≤ h_un) - Light red
+    no_part_indices = findall(i -> !isnan(h_un_values[i]) && u_values[i] <= h_un_values[i],
+                               eachindex(u_values, h_un_values))
+    if !isempty(no_part_indices) && length(no_part_indices) > 1
+        u_start = u_values[no_part_indices[1]]
+        u_end = u_values[no_part_indices[end]]
+        vspan!(p1, [u_start, u_end],
+               color=RGB(1.0, 0.7, 0.7),  # Light red
+               alpha=alpha_val, label="")
+    end
+
+    # Region 2: Participation + run (h_un < u and has bankrun) - Light orange
+    part_indices = findall(i -> !isnan(h_un_values[i]) && u_values[i] > h_un_values[i] && !isnan(max_withdrawals[i]),
+                           eachindex(u_values, h_un_values, max_withdrawals))
+    if !isempty(part_indices) && length(part_indices) > 1
+        u_start = u_values[part_indices[1]]
+        u_end = u_values[part_indices[end]]
+        vspan!(p1, [u_start, u_end],
+               color=RGB(1.0, 0.9, 0.7),  # Light orange
+               alpha=alpha_val, label="")
+    end
+
+    # Region 3: No run (u above threshold) - Light green
+    no_run_indices = findall(isnan.(max_withdrawals))
+    if !isempty(no_run_indices) && length(no_run_indices) > 1
+        u_start = u_values[no_run_indices[1]]
+        u_end = u_values[no_run_indices[end]]
+        vspan!(p1, [u_start, u_end],
+               color=RGB(0.8, 1.0, 0.8),  # Light green
+               alpha=alpha_val, label="")
+    end
+
+    # Add sideways text labels to Panel 1
+    # Region 1 label: "No participation"
+    if !isempty(no_part_indices) && length(no_part_indices) > 1
+        u_mid = (u_values[no_part_indices[1]] + u_values[no_part_indices[end]]) / 2
+        annotate!(p1, u_mid, 0.5,
+                 text("No participation", 8, :grey, rotation=90))
+    end
+
+    # Region 2 label: "Run"
+    if !isempty(part_indices) && length(part_indices) > 1
+        u_mid = (u_values[part_indices[1]] + u_values[part_indices[end]]) / 2
+        annotate!(p1, u_mid, 0.5,
+                 text("Run", 8, :grey, rotation=90))
+    end
+
+    # Region 3 label: "No Run"
+    if !isempty(no_run_indices) && length(no_run_indices) > 1
+        u_mid = (u_values[no_run_indices[1]] + u_values[no_run_indices[end]]) / 2
+        annotate!(p1, u_mid, 0.5,
+                 text("No Run", 8, :grey, rotation=90))
+    end
+
+    # Panel 2: Collapse Time
+    p2 = plot(u_values[valid_collapse], collapse_times[valid_collapse],
+              xlabel="Deposit Utility (u)", ylabel="Time",
+              title="(b) Collapse Time and Return Time (with Participation Constraint)",
+              label="Collapse Time", color=:darkgoldenrod,
+              linestyle=:dash, legend=:topright)
+
+    # Add return times if provided
+    if !isnothing(return_times)
+        valid_return = .!isnan.(return_times)
+        plot!(p2, u_values[valid_return], return_times[valid_return],
+              label="Return Time")
+    end
+
+    # Apply same three-region color scheme to Panel 2
+    # Region 1: No participation (u ≤ h_un) - Light red
+    if !isempty(no_part_indices) && length(no_part_indices) > 1
+        u_start = u_values[no_part_indices[1]]
+        u_end = u_values[no_part_indices[end]]
+        vspan!(p2, [u_start, u_end],
+               color=RGB(1.0, 0.7, 0.7),  # Light red
+               alpha=alpha_val, label="")
+    end
+
+    # Region 2: Participation + run (h_un < u and has bankrun) - Light orange
+    if !isempty(part_indices) && length(part_indices) > 1
+        u_start = u_values[part_indices[1]]
+        u_end = u_values[part_indices[end]]
+        vspan!(p2, [u_start, u_end],
+               color=RGB(1.0, 0.9, 0.7),  # Light orange
+               alpha=alpha_val, label="")
+    end
+
+    # Region 3: No run (u above threshold) - Light green
+    if !isempty(no_run_indices) && length(no_run_indices) > 1
+        u_start = u_values[no_run_indices[1]]
+        u_end = u_values[no_run_indices[end]]
+        vspan!(p2, [u_start, u_end],
+               color=RGB(0.8, 1.0, 0.8),  # Light green
+               alpha=alpha_val, label="")
+    end
+
+    # Add sideways text labels to Panel 2
+    # Calculate middle y-position based on data range
+    valid_times = collapse_times[valid_collapse]
+    if !isnothing(return_times)
+        valid_ret = return_times[.!isnan.(return_times)]
+        if !isempty(valid_ret)
+            valid_times = vcat(valid_times, valid_ret)
+        end
+    end
+    y_mid = (minimum(valid_times) + maximum(valid_times)) / 2
+
+    # Region 1 label: "No participation"
+    if !isempty(no_part_indices) && length(no_part_indices) > 1
+        u_mid = (u_values[no_part_indices[1]] + u_values[no_part_indices[end]]) / 2
+        annotate!(p2, u_mid, y_mid,
+                 text("No participation", 8, :grey, rotation=90))
+    end
+
+    # Region 2 label: "Run"
+    if !isempty(part_indices) && length(part_indices) > 1
+        u_mid = (u_values[part_indices[1]] + u_values[part_indices[end]]) / 2
+        annotate!(p2, u_mid, y_mid,
+                 text("Run", 8, :grey, rotation=90))
+    end
+
+    # Region 3 label: "No Run"
+    if !isempty(no_run_indices) && length(no_run_indices) > 1
+        u_mid = (u_values[no_run_indices[1]] + u_values[no_run_indices[end]]) / 2
+        annotate!(p2, u_mid, y_mid,
+                 text("No Run", 8, :grey, rotation=90))
+    end
+
     return p1, p2
 end

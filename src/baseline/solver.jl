@@ -184,6 +184,66 @@ function hazard_rate(p, a, learning_pdf, η; grid=nothing)
     return HR
 end
 
+"""
+    hazard_rate_uninformed(p, a, learning_pdf, learning_cdf, η; grid=nothing)
+
+Compute uninformed hazard rate using survival function (1-G) instead of PDF g.
+
+This represents the crash risk perceived by agents who have NOT learned about the shock,
+conditioning on "no crash yet". Uninformed agents weight more toward the "healthy" scenario,
+resulting in lower perceived crash risk: h_un(ξ) < h(ξ).
+
+Theoretical formula (from participation3.org):
+    h_un(ξ*) = p * exp(λξ*) * [1-G(ξ*)] /
+               [p∫₀^ξ* exp(λs)[1-G(s)]ds + (1-p)∫₀^η exp(λs)[1-G(s)]ds]
+
+# Arguments
+- `p`: Prior probability bank is fragile
+- `a`: Exponential rate λ
+- `learning_pdf`: PDF function g(t)
+- `learning_cdf`: CDF function G(t)
+- `η`: Awareness window
+- `grid`: Optional time grid
+
+# Returns
+- Interpolated uninformed hazard rate function HR_un(τ)
+"""
+function hazard_rate_uninformed(p, a, learning_pdf, learning_cdf, η; grid=nothing)
+    # Use the learning_cdf's underlying grid if no custom grid provided
+    if isnothing(grid)
+        # Get the underlying grid from the LinearInterpolation
+        # Cut at η because HR don't go beyond
+        τ_bar = learning_cdf.itp.knots[1][learning_cdf.itp.knots[1] .<= η]
+        if length(τ_bar) == 0 || τ_bar[end] != η
+            push!(τ_bar, η)
+        end
+    else
+        τ_bar = grid[grid .<= η]
+        push!(τ_bar, η)
+    end
+
+    ## Define integrand function: exp(a*t) * (1 - G(t))
+    ## KEY DIFFERENCE: survival function (1-G) instead of PDF g
+    eg_survival(t) = exp(a * t) * (1 - learning_cdf(t))
+
+    ## Compute integral terms from trapezoidal rule
+    ## The loop is important: we compute next integral point from the cumulative sum
+    int_0_τ_bar = zeros(length(τ_bar))
+    for i in 2:length(τ_bar)
+        int_0_τ_bar[i] = int_0_τ_bar[i-1] + 0.5 * (eg_survival(τ_bar[i-1]) + eg_survival(τ_bar[i])) * (τ_bar[i] - τ_bar[i-1])
+    end
+    int_0_η = int_0_τ_bar[end]
+
+    ## Generate HR_un as linear interpolation
+    ## Numerator: p * exp(a*τ) * (1-G(τ))
+    ## Denominator: p*int_0_τ + (1-p)*int_0_η
+    HR_un = LinearInterpolation(τ_bar,
+        (p .* exp.(a .* τ_bar) .* (1 .- learning_cdf.(τ_bar))) ./
+        (p .* int_0_τ_bar .+ (1 - p) .* int_0_η))
+
+    return HR_un
+end
+
 #########################################
 # OPTIMAL BUFFER COMPUTATION
 #########################################
@@ -573,4 +633,169 @@ function get_AW_functions!(result::SolvedModel)
         # This handles the case where ξ = NaN
         return result.aw[]
     end
+end
+
+#########################################
+# PARTICIPATION CONSTRAINT CHECKING
+#########################################
+
+"""
+    compute_h_un(solved_model::SolvedModel)
+
+Compute the uninformed hazard rate function for a solved equilibrium.
+
+Returns a LinearInterpolation object that can be evaluated at the crash time ξ
+to check the participation constraint: agents participate iff u > h_un(ξ*).
+
+# Arguments
+- `solved_model::SolvedModel`: A solved equilibrium
+
+# Returns
+- `LinearInterpolation` object representing h_un(τ), or `nothing` if no bankrun
+- Evaluate at crash time: `h_un(solved_model.ξ)` gives h_un(ξ*)
+
+# Example
+```julia
+result = solve_equilibrium_baseline(lr, econ)
+h_un = compute_h_un(result)
+participation_holds = result.model_params.economic.u > h_un(result.ξ)
+```
+"""
+function compute_h_un(solved_model::SolvedModel)
+    # Only compute for bank run equilibria
+    if !solved_model.bankrun
+        return nothing
+    end
+
+    # Extract parameters from solved model
+    econ = solved_model.model_params.economic
+    lr = solved_model.learning_results
+
+    # Compute uninformed hazard rate using survival function
+    h_un = hazard_rate_uninformed(
+        econ.p,              # Prior probability fragile
+        econ.λ,              # Exponential rate
+        lr.learning_pdf,     # PDF g(t)
+        lr.learning_cdf,     # CDF G(t)
+        econ.η;              # Awareness window
+        grid=nothing         # Use default grid from learning results
+    )
+
+    return h_un
+end
+
+"""
+    check_participation(solved_model::SolvedModel) -> Bool
+
+Check whether the participation constraint holds for a solved equilibrium.
+
+Returns `true` if agents participate (u > h_un(ξ*)), `false` otherwise.
+For non-run equilibria (bankrun=false), always returns `true` since
+participation is always optimal when there's no run.
+
+# Arguments
+- `solved_model::SolvedModel`: A solved equilibrium
+
+# Returns
+- `Bool`: true if agents participate, false otherwise
+
+# Example
+```julia
+result = solve_equilibrium_baseline(lr, econ)
+if check_participation(result)
+    println("✓ Agents participate")
+else
+    println("✗ No participation - agents stay out")
+end
+```
+"""
+function check_participation(solved_model::SolvedModel)
+    # No run case: participation always holds
+    if !solved_model.bankrun
+        return true
+    end
+
+    # Extract utility parameter
+    u = solved_model.model_params.economic.u
+
+    # Compute h_un and evaluate at crash time
+    h_un = compute_h_un(solved_model)
+    h_un_at_ξ = h_un(solved_model.ξ)
+
+    # Participation condition: u > h_un(ξ*)
+    return u > h_un_at_ξ
+end
+
+"""
+    check_participation_verbose(solved_model::SolvedModel)
+
+Check participation constraint and print detailed information to console.
+
+Displays:
+- Utility parameter u
+- Uninformed hazard rate h_un(ξ*) at crash time
+- Whether participation constraint holds
+- Comparison with informed hazard rate h(ξ*)
+
+# Arguments
+- `solved_model::SolvedModel`: A solved equilibrium
+
+# Example
+```julia
+result = solve_equilibrium_baseline(lr, econ)
+check_participation_verbose(result)
+# Output:
+# Participation Check:
+#   u = 0.0500
+#   h_un(ξ*) = 0.0324
+#   h(ξ*) = 0.0456  [informed hazard rate]
+#   Condition: u > h_un(ξ*) ? ✓ PARTICIPATION HOLDS
+```
+"""
+function check_participation_verbose(solved_model::SolvedModel)
+    println("─"^60)
+    println("Participation Constraint Verification")
+    println("─"^60)
+
+    # No run case
+    if !solved_model.bankrun
+        println("  Status: No bank run equilibrium")
+        println("  Result: ✓ PARTICIPATION HOLDS (no run → always participate)")
+        println("─"^60)
+        return
+    end
+
+    # Extract parameters
+    u = solved_model.model_params.economic.u
+    ξ = solved_model.ξ
+
+    # Compute uninformed hazard rate
+    h_un = compute_h_un(solved_model)
+    h_un_at_ξ = h_un(ξ)
+
+    # Get informed hazard rate for comparison
+    h_at_ξ = solved_model.HR(ξ)
+
+    # Check condition
+    participates = u > h_un_at_ξ
+
+    # Display results
+    println("  Utility parameter:        u = $(round(u, digits=4))")
+    println("  Crash time:               ξ* = $(round(ξ, digits=4))")
+    println("  ")
+    println("  Uninformed hazard rate:   h_un(ξ*) = $(round(h_un_at_ξ, digits=4))")
+    println("  Informed hazard rate:     h(ξ*) = $(round(h_at_ξ, digits=4))")
+    println("  ")
+    println("  Theoretical prediction:   h_un(ξ*) < h(ξ*) ? $(h_un_at_ξ < h_at_ξ ? "✓" : "✗")")
+    println("  ")
+    println("  Participation condition:  u > h_un(ξ*) ?")
+    println("                            $(round(u, digits=4)) > $(round(h_un_at_ξ, digits=4)) ?")
+
+    if participates
+        println("                            ✓ PARTICIPATION HOLDS")
+    else
+        println("                            ✗ NO PARTICIPATION")
+    end
+
+    println("─"^60)
 end

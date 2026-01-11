@@ -86,6 +86,11 @@ println("  Main equilibrium: ξ* = $(round(result.ξ, digits=2)), bankrun = $(re
 get_AW_functions!(result) #this adds the the full AW curve to the result struct, which doesn't computes them automatically
 println("  Max withdrawals: $(round(result.aw[].AW_max, digits=3))")
 
+# Verify participation constraint
+println("\n")
+check_participation_verbose(result)
+println("\n")
+
 # Figure 3: Equilibrium dynamics plot
 p_eq = plot_equilibrium(result; x_range=(0, 15))
 savefig(p_eq, plot_path * "equilibrium_dynamics_main.pdf")
@@ -140,6 +145,7 @@ u_values = range(0.001, 0.2, length=5000)
 max_withdrawals = Float64[]
 collapse_times = Float64[]
 return_times = Float64[]
+h_un_values = Float64[]  # Track uninformed hazard rate for participation boundary
 
 # Loop over u values
 # Early termination optimization: if no bank run for consecutive u values,
@@ -158,6 +164,7 @@ for (i, u) in enumerate(u_values)
         append!(max_withdrawals, fill(NaN, remaining_count))
         append!(collapse_times, fill(NaN, remaining_count))
         append!(return_times, fill(NaN, remaining_count))
+        append!(h_un_values, fill(NaN, remaining_count))
         skipped_iterations = remaining_count
         println("    Early termination: skipped $skipped_iterations iterations (no-run region)")
         break
@@ -175,6 +182,11 @@ for (i, u) in enumerate(u_values)
         push!(max_withdrawals, result_u.aw[].AW_max)
         push!(collapse_times, result_u.ξ)
         push!(return_times, result_u.ξ - result_u.τ_bar_IN_UNC)  # Return time
+
+        # Compute uninformed hazard rate for participation check
+        h_un = compute_h_un(result_u)
+        push!(h_un_values, h_un(result_u.ξ))
+
         global consecutive_nan_count
         consecutive_nan_count = 0  # Reset counter on successful bank run
     else
@@ -182,6 +194,7 @@ for (i, u) in enumerate(u_values)
         push!(max_withdrawals, NaN)
         push!(collapse_times, NaN)
         push!(return_times, NaN)
+        push!(h_un_values, NaN)
         consecutive_nan_count += 1  # Increment counter for early termination
     end
 
@@ -191,13 +204,22 @@ for (i, u) in enumerate(u_values)
     end
 end
 
-# Create comparative statics plot
+# Create comparative statics plot (original version)
 p1, p2 = plot_comp_stat_withdrawals_and_collapse(u_values, max_withdrawals, collapse_times, m_base.economic.κ;
                                                     return_times=return_times)
 
 savefig(p1, plot_path * "comp_stat_u_panel_a.pdf")
 savefig(p2, plot_path * "comp_stat_u_panel_b.pdf")
-println("  ✓ Figure 4 saved")
+println("  ✓ Figure 4 (original) saved")
+
+# Create comparative statics plot with participation boundary shading
+p1_part, p2_part = plot_comp_stat_with_participation(u_values, max_withdrawals, collapse_times,
+                                                      m_base.economic.κ, h_un_values;
+                                                      return_times=return_times)
+
+savefig(p1_part, plot_path * "comp_stat_u_panel_a_with_participation.pdf")
+savefig(p2_part, plot_path * "comp_stat_u_panel_b_with_participation.pdf")
+println("  ✓ Figure 4 (with participation constraint) saved")
 
 #########################################
 # FIGURE 5: Heatmap - β vs u interaction
@@ -211,6 +233,7 @@ ave_meeting_time = range(0.0001, stop=1, length=500)
 β_vals = 1 ./ ave_meeting_time  # β = 1/average_meeting_time
 u_vals = range(0.001, 1, length=500)
 max_AW_matrix = zeros(length(u_vals), length(β_vals))
+participation_matrix = fill(NaN, length(u_vals), length(β_vals))  # Track participation: 1=participate, 0=no participation
 
 # Progress tracking
 total_iterations = length(β_vals) * length(u_vals)
@@ -237,6 +260,7 @@ for (i, β) in enumerate(β_vals)
             # Fill remaining u values for this β with NaN
             remaining_j = length(u_vals) - j + 1
             max_AW_matrix[j:end, i] .= NaN
+            participation_matrix[j:end, i] .= NaN
             skipped_for_this_beta = remaining_j
             global total_skipped_iterations += skipped_for_this_beta
             global current_iter += skipped_for_this_beta - 1  # Adjust counter (we already incremented once)
@@ -252,9 +276,16 @@ for (i, β) in enumerate(β_vals)
         if result_heatmap.bankrun
             # Compute max withdrawals using lazy evaluation
             max_AW_matrix[j, i] = result_heatmap.aw[].AW_max
+
+            # Check participation constraint
+            h_un = compute_h_un(result_heatmap)
+            participates = u > h_un(result_heatmap.ξ)
+            participation_matrix[j, i] = participates ? 1.0 : 0.0
+
             global consecutive_nan_count = 0  # Reset counter on successful bank run
         else
             max_AW_matrix[j, i] = NaN  # Set to NaN for missing equilibria
+            participation_matrix[j, i] = NaN  # No participation data for non-run equilibria
             global consecutive_nan_count += 1  # Increment counter for early termination
         end
 
@@ -274,7 +305,7 @@ end
 # Convert missing values to NaN for heatmap
 heatmap_data = map(x -> isnan(x) ? NaN : x, max_AW_matrix)
 
-# Create heatmap using average meeting time
+# Create heatmap using average meeting time (original version)
 p_heatmap_AW = heatmap(ave_meeting_time, u_vals, heatmap_data,
                        xlabel="Average meeting time",
                        ylabel="Deposit Utility",
@@ -282,7 +313,213 @@ p_heatmap_AW = heatmap(ave_meeting_time, u_vals, heatmap_data,
                        color=:viridis, alpha=0.8,
                        xtickfont=font(10), ytickfont=font(10))
 savefig(p_heatmap_AW, plot_path * "comp_stat_cross_heatmap_AW.pdf")
-println("  ✓ Figure 5 saved")
+println("  ✓ Figure 5 (original) saved")
+
+# Create heatmap with viridis colormap and participation boundary
+p_heatmap_participation = heatmap(ave_meeting_time, u_vals, heatmap_data,
+                                   xlabel="Average meeting time",
+                                   ylabel="Deposit Utility",
+                                   title="Peak Withdrawals (with Participation)",
+                                   color=:viridis,
+                                   alpha=0.8,
+                                   xtickfont=font(10), ytickfont=font(10))
+
+# Identify no-participation region
+no_part_mask = participation_matrix .== 0.0
+
+# Find participation boundary for contour line
+# Extract boundary points where participation transitions
+boundary_u = Float64[]
+boundary_beta = Float64[]
+for i in 1:length(ave_meeting_time)
+    # Find transition point in u for this beta value
+    for j in 2:length(u_vals)
+        if !isnan(no_part_mask[j-1, i]) && !isnan(no_part_mask[j, i])
+            if no_part_mask[j-1, i] && !no_part_mask[j, i]
+                push!(boundary_beta, ave_meeting_time[i])
+                push!(boundary_u, u_vals[j])
+                break
+            end
+        end
+    end
+end
+
+# Add thin boundary line
+if !isempty(boundary_beta)
+    plot!(p_heatmap_participation, boundary_beta, boundary_u,
+          color=:black, linewidth=1, linestyle=:solid, label="", alpha=0.7)
+end
+
+# Add diagonal hatching to no-participation region
+# Create diagonal lines with appropriate spacing
+line_spacing = (maximum(ave_meeting_time) - minimum(ave_meeting_time)) / 25  # Adjust for density
+
+for i in 1:length(ave_meeting_time)
+    for j in 1:length(u_vals)
+        if !isnan(no_part_mask[j, i]) && no_part_mask[j, i]
+            # Draw short diagonal line segments in hatching pattern
+            # Only draw every Nth point to avoid overcrowding
+            if (i + j) % 40 == 0  # Spacing control
+                x1 = ave_meeting_time[i]
+                y1 = u_vals[j]
+                # Diagonal line at ~45 degrees
+                dx = line_spacing * 0.4
+                dy = (maximum(u_vals) - minimum(u_vals)) / length(u_vals) * 0.6
+                plot!(p_heatmap_participation, [x1-dx, x1+dx], [y1-dy, y1+dy],
+                      color=:black, linewidth=0.5, alpha=0.4, label="")
+            end
+        end
+    end
+end
+
+savefig(p_heatmap_participation, plot_path * "comp_stat_cross_heatmap_AW_with_participation.pdf")
+println("  ✓ Figure 5 (with participation boundary) saved")
+
+# Create categorical heatmap showing just the three regions as solid blocks
+println("\nGenerating Figure 5bis: Participation Regions...")
+
+# Create region classification matrix
+# 1 = No participation, 2 = Participation + run, 3 = No run
+region_matrix = fill(NaN, length(u_vals), length(β_vals))
+
+for i in 1:length(ave_meeting_time)
+    for j in 1:length(u_vals)
+        if isnan(heatmap_data[j, i])
+            # No run equilibrium
+            region_matrix[j, i] = 3.0
+        elseif !isnan(no_part_mask[j, i]) && no_part_mask[j, i]
+            # No participation
+            region_matrix[j, i] = 1.0
+        else
+            # Participation + run
+            region_matrix[j, i] = 2.0
+        end
+    end
+end
+
+# Create custom colormap matching Figure 4 colors
+using Colors
+red_orange_green = [RGB(1.0, 0.7, 0.7),    # Light red - no participation
+                    RGB(1.0, 0.9, 0.7),    # Light orange - participation + run
+                    RGB(0.8, 1.0, 0.8)]    # Light green - no run
+
+p_regions = heatmap(ave_meeting_time, u_vals, region_matrix,
+                    xlabel="Average meeting time",
+                    ylabel="Deposit Utility",
+                    title="Participation Regions",
+                    color=cgrad(red_orange_green, 3, categorical=true),
+                    colorbar=false,
+                    clims=(0.5, 3.5),
+                    xtickfont=font(10), ytickfont=font(10))
+
+savefig(p_regions, plot_path * "comp_stat_cross_regions.pdf")
+println("  ✓ Figure 5bis (participation regions) saved")
+
+# Create gradient version: solid colors for regions 1 & 3, gradient for region 2
+println("\nGenerating Figure 5ter: Participation Regions with Gradient...")
+
+# Create modified data matrix for gradient visualization
+gradient_matrix = fill(NaN, length(u_vals), length(β_vals))
+
+# Get min/max of peak withdrawals in region 2 for normalization
+region2_values = Float64[]
+for i in 1:length(ave_meeting_time)
+    for j in 1:length(u_vals)
+        if !isnan(heatmap_data[j, i]) && (!isnan(no_part_mask[j, i]) && !no_part_mask[j, i])
+            # This is region 2: participation + run
+            push!(region2_values, heatmap_data[j, i])
+        end
+    end
+end
+
+min_region2 = minimum(region2_values)
+max_region2 = maximum(region2_values)
+
+# Populate gradient matrix
+for i in 1:length(ave_meeting_time)
+    for j in 1:length(u_vals)
+        if isnan(heatmap_data[j, i])
+            # Region 3: No run - map to 1.0 (light green end)
+            gradient_matrix[j, i] = 1.0
+        elseif !isnan(no_part_mask[j, i]) && no_part_mask[j, i]
+            # Region 1: No participation - map to 0.0 (light red end)
+            gradient_matrix[j, i] = 0.0
+        else
+            # Region 2: Participation + run - normalize to [0, 1] based on peak withdrawals
+            normalized = (heatmap_data[j, i] - min_region2) / (max_region2 - min_region2)
+            gradient_matrix[j, i] = normalized
+        end
+    end
+end
+
+# Create red-to-green gradient colormap
+red_to_green_gradient = cgrad([RGB(1.0, 0.7, 0.7),    # Light red
+                                RGB(1.0, 0.9, 0.7),    # Light orange (middle)
+                                RGB(0.8, 1.0, 0.8)])   # Light green
+
+p_gradient = heatmap(ave_meeting_time, u_vals, gradient_matrix,
+                     xlabel="Average meeting time",
+                     ylabel="Deposit Utility",
+                     title="Participation Regions (with Gradient)",
+                     color=red_to_green_gradient,
+                     colorbar=true,
+                     clims=(0.0, 1.0),
+                     xtickfont=font(10), ytickfont=font(10))
+
+savefig(p_gradient, plot_path * "comp_stat_cross_regions_gradient.pdf")
+println("  ✓ Figure 5ter (participation regions with gradient) saved")
+
+# Extract participation boundary and plot max AW along it
+println("\nGenerating Figure 5quater: Peak Withdrawals Along Participation Boundary...")
+
+# Extract boundary points with their corresponding max AW values
+boundary_meeting_times = Float64[]
+boundary_u_vals = Float64[]
+boundary_max_AW = Float64[]
+
+for i in 1:length(ave_meeting_time)
+    # Find transition point in u for this beta value
+    for j in 2:length(u_vals)
+        if !isnan(no_part_mask[j-1, i]) && !isnan(no_part_mask[j, i])
+            if no_part_mask[j-1, i] && !no_part_mask[j, i]
+                # Found boundary point
+                push!(boundary_meeting_times, ave_meeting_time[i])
+                push!(boundary_u_vals, u_vals[j])
+                # Get the max AW at this boundary point
+                push!(boundary_max_AW, heatmap_data[j, i])
+                break
+            end
+        end
+    end
+end
+
+# Sort by average meeting time (1/β)
+sort_indices = sortperm(boundary_meeting_times)
+sorted_meeting_times = boundary_meeting_times[sort_indices]
+sorted_u = boundary_u_vals[sort_indices]
+sorted_max_AW = boundary_max_AW[sort_indices]
+
+# Create two-panel figure
+p_boundary_1 = plot(sorted_meeting_times, sorted_max_AW,
+                    xlabel="Average meeting time (1/β)",
+                    ylabel="Peak Withdrawals at Boundary",
+                    title="(a) Peak Withdrawals Along Participation Boundary",
+                    label="", color=:darkred,
+                    marker=:circle, markersize=3,
+                    legend=false)
+
+p_boundary_2 = plot(sorted_u, sorted_max_AW,
+                    xlabel="Deposit Utility (u) at Boundary",
+                    ylabel="Peak Withdrawals at Boundary",
+                    title="(b) Peak Withdrawals vs u at Boundary",
+                    label="", color=:darkblue,
+                    marker=:circle, markersize=3,
+                    legend=false)
+
+p_boundary_combined = plot(p_boundary_1, p_boundary_2, layout=(1,2), size=(1200, 400))
+
+savefig(p_boundary_combined, plot_path * "comp_stat_boundary_analysis.pdf")
+println("  ✓ Figure 5quater (boundary analysis) saved")
 
 #########################################
 # SUMMARY
@@ -300,4 +537,10 @@ println("  3bis. equilibrium_dynamics_fast.pdf")
 println("  3ter. equilibrium_dynamics_low_u.pdf")
 println("  4a. comp_stat_u_panel_a.pdf")
 println("  4b. comp_stat_u_panel_b.pdf")
+println("  4a_part. comp_stat_u_panel_a_with_participation.pdf")
+println("  4b_part. comp_stat_u_panel_b_with_participation.pdf")
 println("  5. comp_stat_cross_heatmap_AW.pdf")
+println("  5_part. comp_stat_cross_heatmap_AW_with_participation.pdf")
+println("  5bis. comp_stat_cross_regions.pdf")
+println("  5ter. comp_stat_cross_regions_gradient.pdf")
+println("  5quater. comp_stat_boundary_analysis.pdf")
