@@ -305,26 +305,23 @@ end
 # Convert missing values to NaN for heatmap
 heatmap_data = map(x -> isnan(x) ? NaN : x, max_AW_matrix)
 
+red_to_green_gradient = cgrad([
+    RGB(0.8, 1.0, 0.8),
+    RGB(1.0, 0.9, 0.7),
+    RGB(1.0, 0.7, 0.7)   
+])
 # Create heatmap using average meeting time (original version)
 p_heatmap_AW = heatmap(ave_meeting_time, u_vals, heatmap_data,
                        xlabel="Average meeting time",
                        ylabel="Deposit Utility",
                        title="Peak Withdrawals",
-                       color=:viridis, alpha=0.8,
+                       color=red_to_green_gradient, alpha=1,
                        xtickfont=font(10), ytickfont=font(10))
 savefig(p_heatmap_AW, plot_path * "comp_stat_cross_heatmap_AW.pdf")
 println("  ✓ Figure 5 (original) saved")
 
 # Create heatmap with viridis colormap and participation boundary
-p_heatmap_participation = heatmap(ave_meeting_time, u_vals, heatmap_data,
-                                   xlabel="Average meeting time",
-                                   ylabel="Deposit Utility",
-                                   title="Peak Withdrawals (with Participation)",
-                                   color=:viridis,
-                                   alpha=0.8,
-                                   xtickfont=font(10), ytickfont=font(10))
-
-# Identify no-participation region
+p_heatmap_participation = p_heatmap_AW# Identify no-participation region
 no_part_mask = participation_matrix .== 0.0
 
 # Find participation boundary for contour line
@@ -350,27 +347,13 @@ if !isempty(boundary_beta)
           color=:black, linewidth=1, linestyle=:solid, label="", alpha=0.7)
 end
 
-# Add diagonal hatching to no-participation region
-# Create diagonal lines with appropriate spacing
-line_spacing = (maximum(ave_meeting_time) - minimum(ave_meeting_time)) / 25  # Adjust for density
+# Add simple grey shading to no-participation region
+# Create overlay: NaN where participation, constant value where no participation
+no_part_overlay = ifelse.(no_part_mask, 1.0, NaN)
 
-for i in 1:length(ave_meeting_time)
-    for j in 1:length(u_vals)
-        if !isnan(no_part_mask[j, i]) && no_part_mask[j, i]
-            # Draw short diagonal line segments in hatching pattern
-            # Only draw every Nth point to avoid overcrowding
-            if (i + j) % 40 == 0  # Spacing control
-                x1 = ave_meeting_time[i]
-                y1 = u_vals[j]
-                # Diagonal line at ~45 degrees
-                dx = line_spacing * 0.4
-                dy = (maximum(u_vals) - minimum(u_vals)) / length(u_vals) * 0.6
-                plot!(p_heatmap_participation, [x1-dx, x1+dx], [y1-dy, y1+dy],
-                      color=:black, linewidth=0.5, alpha=0.4, label="")
-            end
-        end
-    end
-end
+# Overlay with very light grey shading
+heatmap!(p_heatmap_participation, ave_meeting_time, u_vals, no_part_overlay,
+         color=:black, alpha=0.35, colorbar=false)
 
 savefig(p_heatmap_participation, plot_path * "comp_stat_cross_heatmap_AW_with_participation.pdf")
 println("  ✓ Figure 5 (with participation boundary) saved")
@@ -436,8 +419,8 @@ min_region2 = minimum(region2_values)
 max_region2 = maximum(region2_values)
 
 # Populate gradient matrix
-for i in 1:length(ave_meeting_time)
-    for j in 1:length(u_vals)
+for i in length(ave_meeting_time):-1:1
+    for j in length(u_vals):-1:1
         if isnan(heatmap_data[j, i])
             # Region 3: No run - map to 1.0 (light green end)
             gradient_matrix[j, i] = 1.0
@@ -453,17 +436,16 @@ for i in 1:length(ave_meeting_time)
 end
 
 # Create red-to-green gradient colormap
-red_to_green_gradient = cgrad([RGB(1.0, 0.7, 0.7),    # Light red
-                                RGB(1.0, 0.9, 0.7),    # Light orange (middle)
-                                RGB(0.8, 1.0, 0.8)])   # Light green
-
+red_to_green_gradient = cgrad([RGB(1.0, 0.7, 0.7),   
+                                RGB(1.0, 0.9, 0.7),
+                               RGB(0.8, 1.0, 0.8)])   
 p_gradient = heatmap(ave_meeting_time, u_vals, gradient_matrix,
                      xlabel="Average meeting time",
                      ylabel="Deposit Utility",
                      title="Participation Regions (with Gradient)",
                      color=red_to_green_gradient,
                      colorbar=true,
-                     clims=(0.0, 1.0),
+                     clims=(0.6, 0.8),
                      xtickfont=font(10), ytickfont=font(10))
 
 savefig(p_gradient, plot_path * "comp_stat_cross_regions_gradient.pdf")
