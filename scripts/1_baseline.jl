@@ -326,6 +326,8 @@ no_part_mask = participation_matrix .== 0.0
 
 # Find participation boundary for contour line
 # Extract boundary points where participation transitions
+
+# First pass: scan vertically (for each β, find transition in u)
 boundary_u = Float64[]
 boundary_beta = Float64[]
 for i in 1:length(ave_meeting_time)
@@ -341,9 +343,53 @@ for i in 1:length(ave_meeting_time)
     end
 end
 
+# Second pass: scan horizontally for vertical sections (for each u, find leftmost transition in β)
+# This captures the nearly-vertical part at the left edge
+vertical_u = Float64[]
+vertical_beta = Float64[]
+for j in 1:length(u_vals)
+    # Find leftmost transition point in beta for this u value
+    for i in 2:length(ave_meeting_time)
+        if !isnan(no_part_mask[j, i-1]) && !isnan(no_part_mask[j, i])
+            if no_part_mask[j, i-1] && !no_part_mask[j, i]
+                # Check if this is at the left edge (first few β columns)
+                if i <= 3  # Only add if it's in the leftmost region
+                    push!(vertical_beta, ave_meeting_time[i])
+                    push!(vertical_u, u_vals[j])
+                    break
+                end
+            end
+        end
+    end
+end
+
+# Third pass: Add top edge points where no-participation region extends to top of grid
+# For β values where the no-participation region goes all the way to the top
+edge_u = Float64[]
+edge_beta = Float64[]
+for i in 1:length(ave_meeting_time)
+    # Check if the top u value is in no-participation region
+    if !isnan(no_part_mask[end, i]) && no_part_mask[end, i]
+        # Find the highest u that's in no-participation
+        push!(edge_beta, ave_meeting_time[i])
+        push!(edge_u, u_vals[end])
+    end
+end
+
+# Combine all boundary segments
+all_boundary_beta = vcat(boundary_beta, vertical_beta, edge_beta)
+all_boundary_u = vcat(boundary_u, vertical_u, edge_u)
+
+# Sort by beta for smooth plotting
+if !isempty(all_boundary_beta)
+    sort_idx = sortperm(all_boundary_beta)
+    all_boundary_beta = all_boundary_beta[sort_idx]
+    all_boundary_u = all_boundary_u[sort_idx]
+end
+
 # Add thin boundary line
-if !isempty(boundary_beta)
-    plot!(p_heatmap_participation, boundary_beta, boundary_u,
+if !isempty(all_boundary_beta)
+    plot!(p_heatmap_participation, all_boundary_beta, all_boundary_u,
           color=:black, linewidth=1, linestyle=:solid, label="", alpha=0.7)
 end
 
@@ -354,6 +400,20 @@ no_part_overlay = ifelse.(no_part_mask, 1.0, NaN)
 # Overlay with very light grey shading
 heatmap!(p_heatmap_participation, ave_meeting_time, u_vals, no_part_overlay,
          color=:black, alpha=0.35, colorbar=false)
+
+# Add "No participation" text label in white at bottom left of no-participation region
+# Find a point in the bottom-left of the no-participation region
+label_beta_idx = findfirst(i -> any(no_part_mask[:, i]), 1:length(ave_meeting_time))
+if !isnothing(label_beta_idx)
+    label_u_idx = findfirst(j -> no_part_mask[j, label_beta_idx], 1:length(u_vals))
+    if !isnothing(label_u_idx)
+        # Position slightly offset from bottom-left corner of no-participation region
+        label_beta = ave_meeting_time[label_beta_idx] + 0.5
+        label_u = u_vals[label_u_idx] + 0.002
+        annotate!(p_heatmap_participation, label_beta, label_u,
+                 text("No participation", 7, :white, :left))
+    end
+end
 
 savefig(p_heatmap_participation, plot_path * "comp_stat_cross_heatmap_AW_with_participation.pdf")
 println("  ✓ Figure 5 (with participation boundary) saved")
