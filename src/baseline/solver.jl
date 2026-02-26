@@ -191,7 +191,7 @@ Compute uninformed hazard rate using survival function (1-G) instead of PDF g.
 
 This represents the crash risk perceived by agents who have NOT learned about the shock,
 conditioning on "no crash yet". Uninformed agents weight more toward the "healthy" scenario,
-resulting in lower perceived crash risk: h_un(ξ) < h(ξ).
+resulting in lower perceived crash risk: h_un(ξ*) < max_τ h(τ) (Lemma 5).
 
 Theoretical formula (from participation3.org):
     h_un(ξ*) = p * exp(λξ*) * [1-G(ξ*)] /

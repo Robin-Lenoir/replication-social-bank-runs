@@ -101,8 +101,8 @@ scripts/
 - **Figure 3:** Equilibrium dynamics (main scenario)
   - 3bis: Fast communication variant
   - 3ter: Low deposit utility variant
-- **Figure 4:** Comparative statics in deposit utility (2 panels)
-- **Figure 5:** β-u interaction heatmap (peak withdrawals)
+- **Figure 4:** Comparative statics in deposit utility (2 panels, with participation regions)
+- **Figure 5:** β-u interaction heatmap (peak withdrawals, with participation boundary)
 
 ### Extensions (5 figures)
 - **Extension 1 - Heterogeneity:** Aggregate withdrawals with heterogeneous groups

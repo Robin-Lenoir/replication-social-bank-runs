@@ -25,17 +25,17 @@ function plot_learning_distribution(learning_cdf, tspan, β_values; labels=nothi
     p = plot(legend=:bottomright, grid=true,
              xlabel="Time", ylabel="Fraction Informed",
              title="Learning Dynamics")
-    
+
     t_values = range(tspan[1], tspan[2], length=1000)
     colors = [:blue, :red, :green, :purple, :orange]
-    
+
     for (i, cdf) in enumerate(learning_cdf)
         cdf_values = [cdf(t) for t in t_values]
         label = isnothing(labels) ? L"\beta = %$(β_values[i])" : labels[i]
         color = colors[(i-1) % length(colors) + 1]
         plot!(t_values, cdf_values, label=label, linewidth=1.5, color=color)
     end
-    
+
     return p
 end
 
@@ -112,7 +112,7 @@ function plot_hazard_rate_decomposition(result::SolvedModel)
     plot!(eval_points, h_values,
           label=L"h(\tau) \textrm{~-~Total~hazard}",
           lw=1.5, color=:mediumvioletred)
-    
+
     plot!(eval_points, π_values,
           label=L"\pi(\tau) \textrm{~-~Belief~fragile}",
           lw=1, color=:royalblue)
@@ -214,14 +214,14 @@ end
 #########################################
 
 """
-    plot_comp_stat_withdrawals_and_collapse(u_values, max_withdrawals, collapse_times, κ; 
+    plot_comp_stat_withdrawals_and_collapse(u_values, max_withdrawals, collapse_times, κ;
                                            return_times=nothing, plot_path="./")
 
 Plot comparative statics for deposit utility showing peak withdrawals and collapse times.
 
 # Arguments
 - `u_values`: Array of utility parameter values
-- `max_withdrawals`: Array of maximum withdrawal values (may contain NaN)  
+- `max_withdrawals`: Array of maximum withdrawal values (may contain NaN)
 - `collapse_times`: Array of collapse times (may contain NaN)
 - `κ`: Solvency threshold for horizontal line
 - `return_times`: Optional array of return times to overlay on collapse time plot
@@ -230,27 +230,27 @@ Plot comparative statics for deposit utility showing peak withdrawals and collap
 # Returns
 - Combined plot with two panels
 """
-function plot_comp_stat_withdrawals_and_collapse(u_values, max_withdrawals, collapse_times, κ; 
+function plot_comp_stat_withdrawals_and_collapse(u_values, max_withdrawals, collapse_times, κ;
                                                 return_times=nothing)
     gr()
     default(fontfamily="Computer Modern")
-    
+
     # Find valid (non-NaN) values for collapse times
     valid_collapse = .!isnan.(collapse_times)
-    
+
     # Panel 1: Peak Withdrawals
-    p1 = plot(u_values, max_withdrawals, 
-              xlabel="Deposit Utility (u)", ylabel="Peak Withdrawals", 
-              title="(a) Effect on Peak Withdrawals", 
+    p1 = plot(u_values, max_withdrawals,
+              xlabel="Deposit Utility (u)", ylabel="Peak Withdrawals",
+              title="(a) Effect on Peak Withdrawals",
               legend=false, color=:darkred,
               ylims=(0, 1))
-    
+
     # Add threshold line (changed to grey)
     hline!(p1, [κ], color=:grey, linewidth=1, linestyle=:dash, label="")
     # Move kappa annotation slightly left and up
-    annotate!(p1, u_values[1] + 0.03, κ + 0.025, 
+    annotate!(p1, u_values[1] + 0.03, κ + 0.025,
              text("κ = $κ", 8, :left, :grey))
-    
+
     # Add shaded region for invalid values if any
     invalid_indices = findall(isnan, max_withdrawals)
     if !isempty(invalid_indices)
@@ -258,29 +258,29 @@ function plot_comp_stat_withdrawals_and_collapse(u_values, max_withdrawals, coll
             u_start = u_values[invalid_indices[1]]
             u_end = u_values[invalid_indices[end]]
             vspan!(p1, [u_start, u_end], color=:gray, alpha=0.2, label="")
-            
+
             # Add annotation
             mid_u = (u_start + u_end) / 2
             mid_y = (0 + 1) / 2
-            annotate!(p1, mid_u, mid_y, 
+            annotate!(p1, mid_u, mid_y,
                      text("No Bank Run", 8, :black, rotation=90))
         end
     end
-    
-    # Panel 2: Collapse Time  
+
+    # Panel 2: Collapse Time
     p2 = plot(u_values[valid_collapse], collapse_times[valid_collapse],
-              xlabel="Deposit Utility (u)", ylabel="Time", 
+              xlabel="Deposit Utility (u)", ylabel="Time",
               title="(b) Collapse Time and Return Time",
               label="Collapse Time", color=:darkgoldenrod,
               linestyle=:dash, legend=:topright)
-    
+
     # Add return times if provided
     if !isnothing(return_times)
         valid_return = .!isnan.(return_times)
         plot!(p2, u_values[valid_return], return_times[valid_return],
               label="Return Time")
     end
-    
+
     # Add shaded region for no-run cases
     invalid_collapse_indices = findall(.!valid_collapse)
     if !isempty(invalid_collapse_indices)
@@ -288,12 +288,12 @@ function plot_comp_stat_withdrawals_and_collapse(u_values, max_withdrawals, coll
             u_start = u_values[invalid_collapse_indices[1]]
             u_end = u_values[invalid_collapse_indices[end]]
             vspan!(p2, [u_start, u_end], color=:gray, alpha=0.2, label="")
-            
+
             # Add annotation
             mid_u = (u_start + u_end) / 2
             y_range = ylims(p2)
             mid_y = (y_range[1] + y_range[2]) / 2
-            annotate!(p2, mid_u, mid_y, 
+            annotate!(p2, mid_u, mid_y,
                      text("No Bank Run", 8, :black, rotation=90))
         end
     end
@@ -476,4 +476,134 @@ function plot_comp_stat_with_participation(u_values, max_withdrawals, collapse_t
     end
 
     return p1, p2
+end
+
+"""
+    plot_heatmap_with_participation_boundary(ave_meeting_time, u_vals, heatmap_data, participation_matrix)
+
+Create a heatmap of peak withdrawals with participation boundary visualization.
+
+This function creates a viridis-colored heatmap showing peak withdrawals across the (β, u) parameter space,
+with an overlay indicating the participation constraint boundary. The no-participation region (where u < h_un(ξ*))
+is shaded in grey and labeled.
+
+# Arguments
+- `ave_meeting_time`: Vector of average meeting times (1/β values) for x-axis
+- `u_vals`: Vector of deposit utility values for y-axis
+- `heatmap_data`: Matrix of peak withdrawal values (dimensions: length(u_vals) × length(ave_meeting_time))
+- `participation_matrix`: Boolean matrix indicating participation (1.0 = participates, 0.0 = no participation)
+
+# Returns
+- Plot object with viridis heatmap, boundary line, shading, and text label
+
+# Implementation Details
+The function uses a three-pass boundary detection algorithm:
+1. **Vertical scan**: For each β column, find where u transitions from no-participation to participation
+2. **Horizontal scan**: For each u row, find leftmost β transition (captures nearly-vertical edge)
+3. **Top edge scan**: Add points where no-participation extends to max(u)
+
+# Example
+```julia
+p = plot_heatmap_with_participation_boundary(ave_meeting_time, u_vals, heatmap_data, participation_matrix)
+savefig(p, "heatmap_with_boundary.pdf")
+```
+"""
+function plot_heatmap_with_participation_boundary(ave_meeting_time, u_vals, heatmap_data, participation_matrix)
+    gr()
+    default(fontfamily="Computer Modern")
+
+    # Create base viridis heatmap
+    p_heatmap = heatmap(ave_meeting_time, u_vals, heatmap_data,
+                        xlabel="Average meeting time",
+                        ylabel="Deposit Utility",
+                        title="Peak Withdrawals (with Participation)",
+                        color=:viridis,
+                        alpha=0.8,
+                        xtickfont=font(10), ytickfont=font(10))
+
+    # Identify no-participation region
+    no_part_mask = participation_matrix .== 0.0
+
+    # Three-pass boundary detection
+
+    # Pass 1: Vertical scan (for each β, find transition in u)
+    boundary_u = Float64[]
+    boundary_beta = Float64[]
+    for i in 1:length(ave_meeting_time)
+        for j in 2:length(u_vals)
+            if !isnan(no_part_mask[j-1, i]) && !isnan(no_part_mask[j, i])
+                if no_part_mask[j-1, i] && !no_part_mask[j, i]
+                    push!(boundary_beta, ave_meeting_time[i])
+                    push!(boundary_u, u_vals[j])
+                    break
+                end
+            end
+        end
+    end
+
+    # Pass 2: Horizontal scan (for each u, find leftmost transition in β)
+    # This captures the nearly-vertical part at the left edge
+    vertical_u = Float64[]
+    vertical_beta = Float64[]
+    for j in 1:length(u_vals)
+        for i in 2:length(ave_meeting_time)
+            if !isnan(no_part_mask[j, i-1]) && !isnan(no_part_mask[j, i])
+                if no_part_mask[j, i-1] && !no_part_mask[j, i]
+                  # Only add if it's in the leftmost region
+                    if i <= 3
+                        push!(vertical_beta, ave_meeting_time[i])
+                        push!(vertical_u, u_vals[j])
+                        break
+                    end
+                end
+            end
+        end
+    end
+
+    # Pass 3: Top edge scan (where no-participation extends to top of grid)
+    edge_u = Float64[]
+    edge_beta = Float64[]
+    for i in 1:length(ave_meeting_time)
+        if !isnan(no_part_mask[end, i]) && no_part_mask[end, i]
+            push!(edge_beta, ave_meeting_time[i])
+            push!(edge_u, u_vals[end])
+        end
+    end
+
+    # Combine all boundary segments
+    all_boundary_beta = vcat(boundary_beta, vertical_beta, edge_beta)
+    all_boundary_u = vcat(boundary_u, vertical_u, edge_u)
+
+    # Sort by beta for smooth plotting
+    if !isempty(all_boundary_beta)
+        sort_idx = sortperm(all_boundary_beta)
+        all_boundary_beta = all_boundary_beta[sort_idx]
+        all_boundary_u = all_boundary_u[sort_idx]
+    end
+
+    # Add thin boundary line
+    if !isempty(all_boundary_beta)
+        plot!(p_heatmap, all_boundary_beta, all_boundary_u,
+              color=:black, linewidth=1, linestyle=:solid, label="", alpha=0.7)
+    end
+
+    # Add grey shading to no-participation region
+    no_part_overlay = ifelse.(no_part_mask, 1.0, NaN)
+    heatmap!(p_heatmap, ave_meeting_time, u_vals, no_part_overlay,
+             color=:black, alpha=0.35, colorbar=false)
+
+    # Add "No participation" text label in white at bottom-left
+    label_beta_idx = findfirst(i -> any(no_part_mask[:, i]), 1:length(ave_meeting_time))
+    if !isnothing(label_beta_idx)
+        label_u_idx = findfirst(j -> no_part_mask[j, label_beta_idx], 1:length(u_vals))
+        if !isnothing(label_u_idx)
+            # Position in the no-participation region
+            label_beta = 0.15
+            label_u = 0.02
+            annotate!(p_heatmap, label_beta, label_u,
+                     text("No participation", 7, :white, :left))
+        end
+    end
+
+    return p_heatmap
 end

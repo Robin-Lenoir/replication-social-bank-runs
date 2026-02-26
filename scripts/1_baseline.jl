@@ -204,22 +204,14 @@ for (i, u) in enumerate(u_values)
     end
 end
 
-# Create comparative statics plot (original version)
-p1, p2 = plot_comp_stat_withdrawals_and_collapse(u_values, max_withdrawals, collapse_times, m_base.economic.κ;
-                                                    return_times=return_times)
+# Create comparative statics plot with participation boundary shading
+p1, p2 = plot_comp_stat_with_participation(u_values, max_withdrawals, collapse_times,
+                                            m_base.economic.κ, h_un_values;
+                                            return_times=return_times)
 
 savefig(p1, plot_path * "comp_stat_u_panel_a.pdf")
 savefig(p2, plot_path * "comp_stat_u_panel_b.pdf")
-println("  ✓ Figure 4 (original) saved")
-
-# Create comparative statics plot with participation boundary shading
-p1_part, p2_part = plot_comp_stat_with_participation(u_values, max_withdrawals, collapse_times,
-                                                      m_base.economic.κ, h_un_values;
-                                                      return_times=return_times)
-
-savefig(p1_part, plot_path * "comp_stat_u_panel_a_with_participation.pdf")
-savefig(p2_part, plot_path * "comp_stat_u_panel_b_with_participation.pdf")
-println("  ✓ Figure 4 (with participation constraint) saved")
+println("  ✓ Figure 4 saved")
 
 #########################################
 # FIGURE 5: Heatmap - β vs u interaction
@@ -310,258 +302,13 @@ red_to_green_gradient = cgrad([
     RGB(1.0, 0.9, 0.7),
     RGB(1.0, 0.7, 0.7)   
 ])
-# Create heatmap using average meeting time (original version)
-p_heatmap_AW = heatmap(ave_meeting_time, u_vals, heatmap_data,
-                       xlabel="Average meeting time",
-                       ylabel="Deposit Utility",
-                       title="Peak Withdrawals",
-                       color=red_to_green_gradient, alpha=1,
-                       xtickfont=font(10), ytickfont=font(10))
-savefig(p_heatmap_AW, plot_path * "comp_stat_cross_heatmap_AW.pdf")
-println("  ✓ Figure 5 (original) saved")
-
 # Create heatmap with viridis colormap and participation boundary
-p_heatmap_participation = p_heatmap_AW# Identify no-participation region
-no_part_mask = participation_matrix .== 0.0
+println("\nGenerating Figure 5: Peak Withdrawals Heatmap...")
 
-# Find participation boundary for contour line
-# Extract boundary points where participation transitions
-
-# First pass: scan vertically (for each β, find transition in u)
-boundary_u = Float64[]
-boundary_beta = Float64[]
-for i in 1:length(ave_meeting_time)
-    # Find transition point in u for this beta value
-    for j in 2:length(u_vals)
-        if !isnan(no_part_mask[j-1, i]) && !isnan(no_part_mask[j, i])
-            if no_part_mask[j-1, i] && !no_part_mask[j, i]
-                push!(boundary_beta, ave_meeting_time[i])
-                push!(boundary_u, u_vals[j])
-                break
-            end
-        end
-    end
-end
-
-# Second pass: scan horizontally for vertical sections (for each u, find leftmost transition in β)
-# This captures the nearly-vertical part at the left edge
-vertical_u = Float64[]
-vertical_beta = Float64[]
-for j in 1:length(u_vals)
-    # Find leftmost transition point in beta for this u value
-    for i in 2:length(ave_meeting_time)
-        if !isnan(no_part_mask[j, i-1]) && !isnan(no_part_mask[j, i])
-            if no_part_mask[j, i-1] && !no_part_mask[j, i]
-                # Check if this is at the left edge (first few β columns)
-                if i <= 3  # Only add if it's in the leftmost region
-                    push!(vertical_beta, ave_meeting_time[i])
-                    push!(vertical_u, u_vals[j])
-                    break
-                end
-            end
-        end
-    end
-end
-
-# Third pass: Add top edge points where no-participation region extends to top of grid
-# For β values where the no-participation region goes all the way to the top
-edge_u = Float64[]
-edge_beta = Float64[]
-for i in 1:length(ave_meeting_time)
-    # Check if the top u value is in no-participation region
-    if !isnan(no_part_mask[end, i]) && no_part_mask[end, i]
-        # Find the highest u that's in no-participation
-        push!(edge_beta, ave_meeting_time[i])
-        push!(edge_u, u_vals[end])
-    end
-end
-
-# Combine all boundary segments
-all_boundary_beta = vcat(boundary_beta, vertical_beta, edge_beta)
-all_boundary_u = vcat(boundary_u, vertical_u, edge_u)
-
-# Sort by beta for smooth plotting
-if !isempty(all_boundary_beta)
-    sort_idx = sortperm(all_boundary_beta)
-    all_boundary_beta = all_boundary_beta[sort_idx]
-    all_boundary_u = all_boundary_u[sort_idx]
-end
-
-# Add thin boundary line
-if !isempty(all_boundary_beta)
-    plot!(p_heatmap_participation, all_boundary_beta, all_boundary_u,
-          color=:black, linewidth=1, linestyle=:solid, label="", alpha=0.7)
-end
-
-# Add simple grey shading to no-participation region
-# Create overlay: NaN where participation, constant value where no participation
-no_part_overlay = ifelse.(no_part_mask, 1.0, NaN)
-
-# Overlay with very light grey shading
-heatmap!(p_heatmap_participation, ave_meeting_time, u_vals, no_part_overlay,
-         color=:black, alpha=0.35, colorbar=false)
-
-# Add "No participation" text label in white at bottom left of no-participation region
-# Find a point in the bottom-left of the no-participation region
-label_beta_idx = findfirst(i -> any(no_part_mask[:, i]), 1:length(ave_meeting_time))
-if !isnothing(label_beta_idx)
-    label_u_idx = findfirst(j -> no_part_mask[j, label_beta_idx], 1:length(u_vals))
-    if !isnothing(label_u_idx)
-        # Position slightly offset from bottom-left corner of no-participation region
-        label_beta = ave_meeting_time[label_beta_idx] + 0.5
-        label_u = u_vals[label_u_idx] + 0.002
-        annotate!(p_heatmap_participation, label_beta, label_u,
-                 text("No participation", 7, :white, :left))
-    end
-end
-
-savefig(p_heatmap_participation, plot_path * "comp_stat_cross_heatmap_AW_with_participation.pdf")
-println("  ✓ Figure 5 (with participation boundary) saved")
-
-# Create categorical heatmap showing just the three regions as solid blocks
-println("\nGenerating Figure 5bis: Participation Regions...")
-
-# Create region classification matrix
-# 1 = No participation, 2 = Participation + run, 3 = No run
-region_matrix = fill(NaN, length(u_vals), length(β_vals))
-
-for i in 1:length(ave_meeting_time)
-    for j in 1:length(u_vals)
-        if isnan(heatmap_data[j, i])
-            # No run equilibrium
-            region_matrix[j, i] = 3.0
-        elseif !isnan(no_part_mask[j, i]) && no_part_mask[j, i]
-            # No participation
-            region_matrix[j, i] = 1.0
-        else
-            # Participation + run
-            region_matrix[j, i] = 2.0
-        end
-    end
-end
-
-# Create custom colormap matching Figure 4 colors
-using Colors
-red_orange_green = [RGB(1.0, 0.7, 0.7),    # Light red - no participation
-                    RGB(1.0, 0.9, 0.7),    # Light orange - participation + run
-                    RGB(0.8, 1.0, 0.8)]    # Light green - no run
-
-p_regions = heatmap(ave_meeting_time, u_vals, region_matrix,
-                    xlabel="Average meeting time",
-                    ylabel="Deposit Utility",
-                    title="Participation Regions",
-                    color=cgrad(red_orange_green, 3, categorical=true),
-                    colorbar=false,
-                    clims=(0.5, 3.5),
-                    xtickfont=font(10), ytickfont=font(10))
-
-savefig(p_regions, plot_path * "comp_stat_cross_regions.pdf")
-println("  ✓ Figure 5bis (participation regions) saved")
-
-# Create gradient version: solid colors for regions 1 & 3, gradient for region 2
-println("\nGenerating Figure 5ter: Participation Regions with Gradient...")
-
-# Create modified data matrix for gradient visualization
-gradient_matrix = fill(NaN, length(u_vals), length(β_vals))
-
-# Get min/max of peak withdrawals in region 2 for normalization
-region2_values = Float64[]
-for i in 1:length(ave_meeting_time)
-    for j in 1:length(u_vals)
-        if !isnan(heatmap_data[j, i]) && (!isnan(no_part_mask[j, i]) && !no_part_mask[j, i])
-            # This is region 2: participation + run
-            push!(region2_values, heatmap_data[j, i])
-        end
-    end
-end
-
-min_region2 = minimum(region2_values)
-max_region2 = maximum(region2_values)
-
-# Populate gradient matrix
-for i in length(ave_meeting_time):-1:1
-    for j in length(u_vals):-1:1
-        if isnan(heatmap_data[j, i])
-            # Region 3: No run - map to 1.0 (light green end)
-            gradient_matrix[j, i] = 1.0
-        elseif !isnan(no_part_mask[j, i]) && no_part_mask[j, i]
-            # Region 1: No participation - map to 0.0 (light red end)
-            gradient_matrix[j, i] = 0.0
-        else
-            # Region 2: Participation + run - normalize to [0, 1] based on peak withdrawals
-            normalized = (heatmap_data[j, i] - min_region2) / (max_region2 - min_region2)
-            gradient_matrix[j, i] = normalized
-        end
-    end
-end
-
-# Create red-to-green gradient colormap
-red_to_green_gradient = cgrad([RGB(1.0, 0.7, 0.7),   
-                                RGB(1.0, 0.9, 0.7),
-                               RGB(0.8, 1.0, 0.8)])   
-p_gradient = heatmap(ave_meeting_time, u_vals, gradient_matrix,
-                     xlabel="Average meeting time",
-                     ylabel="Deposit Utility",
-                     title="Participation Regions (with Gradient)",
-                     color=red_to_green_gradient,
-                     colorbar=true,
-                     clims=(0.6, 0.8),
-                     xtickfont=font(10), ytickfont=font(10))
-
-savefig(p_gradient, plot_path * "comp_stat_cross_regions_gradient.pdf")
-println("  ✓ Figure 5ter (participation regions with gradient) saved")
-
-# Extract participation boundary and plot max AW along it
-println("\nGenerating Figure 5quater: Peak Withdrawals Along Participation Boundary...")
-
-# Extract boundary points with their corresponding max AW values
-boundary_meeting_times = Float64[]
-boundary_u_vals = Float64[]
-boundary_max_AW = Float64[]
-
-for i in 1:length(ave_meeting_time)
-    # Find transition point in u for this beta value
-    for j in 2:length(u_vals)
-        if !isnan(no_part_mask[j-1, i]) && !isnan(no_part_mask[j, i])
-            if no_part_mask[j-1, i] && !no_part_mask[j, i]
-                # Found boundary point
-                push!(boundary_meeting_times, ave_meeting_time[i])
-                push!(boundary_u_vals, u_vals[j])
-                # Get the max AW at this boundary point
-                push!(boundary_max_AW, heatmap_data[j, i])
-                break
-            end
-        end
-    end
-end
-
-# Sort by average meeting time (1/β)
-sort_indices = sortperm(boundary_meeting_times)
-sorted_meeting_times = boundary_meeting_times[sort_indices]
-sorted_u = boundary_u_vals[sort_indices]
-sorted_max_AW = boundary_max_AW[sort_indices]
-
-# Create two-panel figure
-p_boundary_1 = plot(sorted_meeting_times, sorted_max_AW,
-                    xlabel="Average meeting time (1/β)",
-                    ylabel="Peak Withdrawals at Boundary",
-                    title="(a) Peak Withdrawals Along Participation Boundary",
-                    label="", color=:darkred,
-                    marker=:circle, markersize=3,
-                    legend=false)
-
-p_boundary_2 = plot(sorted_u, sorted_max_AW,
-                    xlabel="Deposit Utility (u) at Boundary",
-                    ylabel="Peak Withdrawals at Boundary",
-                    title="(b) Peak Withdrawals vs u at Boundary",
-                    label="", color=:darkblue,
-                    marker=:circle, markersize=3,
-                    legend=false)
-
-p_boundary_combined = plot(p_boundary_1, p_boundary_2, layout=(1,2), size=(1200, 400))
-
-savefig(p_boundary_combined, plot_path * "comp_stat_boundary_analysis.pdf")
-println("  ✓ Figure 5quater (boundary analysis) saved")
+p_heatmap = plot_heatmap_with_participation_boundary(ave_meeting_time, u_vals,
+                                                      heatmap_data, participation_matrix)
+savefig(p_heatmap, plot_path * "comp_stat_cross_heatmap_AW.pdf")
+println("  ✓ Figure 5 saved")
 
 #########################################
 # SUMMARY
@@ -577,12 +324,6 @@ println("  2. hazard_rate.pdf")
 println("  3. equilibrium_dynamics_main.pdf")
 println("  3bis. equilibrium_dynamics_fast.pdf")
 println("  3ter. equilibrium_dynamics_low_u.pdf")
-println("  4a. comp_stat_u_panel_a.pdf")
-println("  4b. comp_stat_u_panel_b.pdf")
-println("  4a_part. comp_stat_u_panel_a_with_participation.pdf")
-println("  4b_part. comp_stat_u_panel_b_with_participation.pdf")
-println("  5. comp_stat_cross_heatmap_AW.pdf")
-println("  5_part. comp_stat_cross_heatmap_AW_with_participation.pdf")
-println("  5bis. comp_stat_cross_regions.pdf")
-println("  5ter. comp_stat_cross_regions_gradient.pdf")
-println("  5quater. comp_stat_boundary_analysis.pdf")
+println("  4a. comp_stat_u_panel_a.pdf (with participation regions)")
+println("  4b. comp_stat_u_panel_b.pdf (with participation regions)")
+println("  5. comp_stat_cross_heatmap_AW.pdf (with participation boundary)")
