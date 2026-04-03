@@ -137,7 +137,6 @@ println("\nGenerating Figure 4: Effect of Deposit Utility...")
 
 # u values to sweep over
 # I keep the paper resultion of 5000 points here
-# It takes ~1 min to run
 # You may want to set lower resolution for faster sweep
 u_values = range(0.001, 0.2, length=5000)
 

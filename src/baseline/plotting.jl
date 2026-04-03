@@ -335,7 +335,6 @@ function plot_comp_stat_with_participation(u_values, max_withdrawals, collapse_t
     # Panel 1: Peak Withdrawals
     p1 = plot(u_values, max_withdrawals,
               xlabel="Deposit Utility (u)", ylabel="Peak Withdrawals",
-              title="(a) Effect on Peak Withdrawals (with Participation Constraint)",
               legend=false, color=:darkred,
               ylims=(0, 1))
 
@@ -404,7 +403,6 @@ function plot_comp_stat_with_participation(u_values, max_withdrawals, collapse_t
     # Panel 2: Collapse Time
     p2 = plot(u_values[valid_collapse], collapse_times[valid_collapse],
               xlabel="Deposit Utility (u)", ylabel="Time",
-              title="(b) Collapse Time and Return Time (with Participation Constraint)",
               label="Collapse Time", color=:darkgoldenrod,
               linestyle=:dash, legend=:topright)
 
@@ -516,9 +514,11 @@ function plot_heatmap_with_participation_boundary(ave_meeting_time, u_vals, heat
     p_heatmap = heatmap(ave_meeting_time, u_vals, heatmap_data,
                         xlabel="Average meeting time",
                         ylabel="Deposit Utility",
-                        title="Peak Withdrawals (with Participation)",
+                        colorbar=true,
                         color=:viridis,
                         alpha=0.8,
+                        size=(700, 400),
+                        right_margin=5Plots.mm,
                         xtickfont=font(10), ytickfont=font(10))
 
     # Identify no-participation region
@@ -587,10 +587,19 @@ function plot_heatmap_with_participation_boundary(ave_meeting_time, u_vals, heat
               color=:black, linewidth=1, linestyle=:solid, label="", alpha=0.7)
     end
 
-    # Add grey shading to no-participation region
-    no_part_overlay = ifelse.(no_part_mask, 1.0, NaN)
-    heatmap!(p_heatmap, ave_meeting_time, u_vals, no_part_overlay,
-             color=:black, alpha=0.35, colorbar=false)
+    # Add grey shading to no-participation region using filled polygon
+    # (Using heatmap! overlay would suppress the colorbar in GR backend)
+    if !isempty(all_boundary_beta)
+        # Build polygon: boundary curve + corners of the no-participation region
+        beta_min = minimum(ave_meeting_time)
+        beta_max = maximum(ave_meeting_time)
+        u_min = minimum(u_vals)
+        # Polygon: bottom-right → bottom-left → up the left edge → along boundary → close
+        poly_x = vcat([beta_max], reverse(all_boundary_beta), [beta_min, beta_min, beta_max])
+        poly_y = vcat([u_min], reverse(all_boundary_u), [all_boundary_u[1], u_min, u_min])
+        plot!(p_heatmap, Shape(poly_x, poly_y),
+              fillcolor=:black, fillalpha=0.35, linewidth=0, label="")
+    end
 
     # Add "No participation" text label in white at bottom-left
     label_beta_idx = findfirst(i -> any(no_part_mask[:, i]), 1:length(ave_meeting_time))

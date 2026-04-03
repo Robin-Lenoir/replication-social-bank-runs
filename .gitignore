@@ -21,3 +21,4 @@
   *~
   *.swp
   *.el
+/.agent-shell/
